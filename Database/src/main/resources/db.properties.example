@@ -1,0 +1,6 @@
+db.url=jdbc:postgresql://localhost:5432/online_sales
+db.user=postgres
+db.password=CHANGE_ME
+db.test.url=jdbc:postgresql://localhost:5432/online_sales_test
+db.test.user=postgres
+db.test.password=CHANGE_ME
