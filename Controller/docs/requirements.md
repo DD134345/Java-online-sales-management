@@ -175,7 +175,7 @@ Type Legend:
   - `Database/`: `schema.sql`, automated setup runner in `DbSetup.java`.
 
 #### `F1.3`: Seed Data Provisioning
-- **Description:** Populate initial baseline data from `db/seed.sql` including the default Admin account (`admin / admin123`), sales staff (`staff1 / staff123`), root product categories, sample products, and demo customers.
+- **Description:** Populate initial baseline data from `db/seed.sql` including the default Admin account (`admin / Admin@123`), sales staff (`sales1 / Sales@123`), root product categories, sample products, and demo customers.
 - **Inputs:** `seedScriptPath: String` (`db/seed.sql`).
 - **Outputs:** `recordsInserted: Integer`, `isSuccess: Boolean`.
 - **Business Rules:**
@@ -193,7 +193,7 @@ Type Legend:
 - **Description:** Authenticate a staff member against stored credentials and return their profile with role permissions.
 - **Inputs:**
   - `username: String` (not null, 3–50 chars, trimmed)
-  - `password: String` (not null, plain text from password field)
+  - `password: char[]` (not null, plain text from password field)
 - **Outputs:**
   - `staff: Staff` (containing `staffId: Integer`, `username: String`, `fullName: String`, `email: String`, `phone: String`, `role: Role`, `active: Boolean`)
   - Throws `AuthenticationException` on invalid credentials or inactive account.
@@ -201,10 +201,11 @@ Type Legend:
   1. Passwords must be hashed using SHA-256 with salt. Plain text passwords must never be stored or logged.
   2. If `active == false`, login is rejected with error: *"Account has been deactivated. Please contact the administrator."*
   3. Case-insensitive username matching.
+  4. Unknown username and wrong password give the same message: *Wrong username or password.*
 - **Screen:** `LoginDialog`
 - **Tier Responsibilities:**
   - `Database/`: `StaffDao.findByUsername(String username): Optional<StaffRecord>`.
-  - `Controller/`: `AuthService.login(String username, String password): Staff`.
+  - `Controller/`: `AuthService.login(String username, char[] password): Staff`.
   - `UI/UX/`: `LoginDialog` captures input, calls `AuthService`, and passes `Staff` session to `MainWindow`.
 
 #### `F2.2`: Session & Role Resolution
@@ -230,6 +231,7 @@ Type Legend:
   2. `username` must be unique across all staff.
   3. Admin cannot deactivate their own currently active account.
   4. Phone must be valid Vietnamese format (10 digits starting with `0`).
+  5. Since S2 staff can also create their own SALES_STAFF account (F2.5); only an admin can grant ADMIN.
 - **Screen:** `StaffManagementDialog`
 - **Tier Responsibilities:**
   - `Database/`: `StaffDao.insert(StaffRecord)`, `StaffDao.update(StaffRecord)`, `StaffDao.findAll()`.
@@ -246,6 +248,33 @@ Type Legend:
 - **Tier Responsibilities:**
   - `Controller/`: `AuthService.logout()`.
   - `UI/UX/`: Disposes `MainWindow`, instantiates new `LoginDialog`.
+
+#### `F2.5`: Staff Self Sign-up (login screen)
+- **Description:** Allow a new staff member to self-register an account from the login screen. Self-registered accounts are always created with the `SALES_STAFF` role and active status.
+- **Inputs:**
+  - `username: String`
+  - `password: char[]`
+  - `confirmPassword: char[]`
+  - `fullName: String`
+  - `email: String`
+  - `phone: String`
+- **Outputs:** `savedStaff: Staff`
+- **Business Rules:**
+  1. The role is always `SALES_STAFF` and `active` is always `true`. Admin privileges can only be granted by an administrator (F2.3).
+  2. Full name: trimmed, 2 to 100 characters, else: *"Full name must be 2 to 100 characters."*
+  3. Email: trimmed, max 100 characters, valid email format (`^[^@\s]+@[^@\s]+\.[^@\s]+$`), else: *"Enter a valid email address."*
+  4. Phone: trimmed, exactly 10 digits starting with 0 (`^0\d{9}$`), else: *"Phone must be 10 digits starting with 0."*
+  5. Username: trimmed, lower-cased, 3 to 50 characters matching `^[a-z0-9._]{3,50}$`, else: *"Username must be 3 to 50 letters, digits, dots or underscores."*
+  6. Password: at least 8 characters, containing at least one letter and one digit, else: *"Password must be at least 8 characters with a letter and a digit."*
+  7. Passwords must match; if `password` and `confirmPassword` differ, UI displays: *"Passwords do not match."*
+  8. Username uniqueness: if username already exists (`findByUsername` present), error: *"Username is already taken."*
+  9. Race safety: if concurrent sign-up passes pre-check but conflicts on database insert (`DataAccessException`), verify existing username and report: *"Username is already taken."*
+  10. Sign-up does not automatically log the user in; the user must log in using their credentials after registration.
+- **Screen:** `SignUpDialog` (`SCR-16`)
+- **Tier Responsibilities:**
+  - `Database/`: `StaffDao.findByUsername`, `StaffDao.insert`.
+  - `Controller/`: `AuthService.signUp(...)`.
+  - `UI/UX/`: `SignUpDialog` opened from `LoginDialog` "Create account...".
 
 ---
 
@@ -631,6 +660,7 @@ This catalog specifies all user interfaces in the desktop application. This tabl
 | `SCR-13` | `OrderManagementPanel` | `JPanel` (Tab in `MainWindow`) | Browse order queue, multi-filter by status, date range, customer name/code. Context actions: view detail receipt, advance status (`PAID` $\rightarrow$ `SHIPPED`), cancel order. | `MainWindow` ("Orders" Tab) | All (`ADMIN`, `SALES_STAFF`) |
 | `SCR-14` | `StatisticsPanel` | `JPanel` (Tab in `MainWindow`) | Analytical dashboard with three sub-views: (1) Daily Revenue Summary table & totals, (2) Top 10 Selling Products leaderboard, (3) Low-Stock Alerts table. | `MainWindow` ("Statistics" Tab) | Revenue/Top: `ADMIN` only; Low-Stock: All |
 | `SCR-15` | `StaffManagementDialog` | `JDialog` (Modal) | Manage employee user accounts: list staff, register new employee, assign `Role` (`ADMIN` or `SALES_STAFF`), toggle active status, reset password. | `MainWindow` (Menu: Management $\rightarrow$ Staff Accounts) | `ADMIN` only |
+| `SCR-16` | `SignUpDialog` | `JDialog` (Modal) | Staff self-registration form (username, password, confirm password, full name, email, phone). Creates new `SALES_STAFF` account. | `LoginDialog` ("Create account..." button) | All (Unauthenticated) |
 
 ---
 
