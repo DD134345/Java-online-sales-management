@@ -1,41 +1,38 @@
 package freshlink.database;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Properties;
 
-/**
- * Opens connections to the PostgreSQL database.
- * The URL, user and password are read from db.properties (copy db.properties.example).
- */
+// Gives out connections to PostgreSQL. Login info comes from db.properties.
 public class DBConnection {
 
-    private static final Properties config = new Properties();
-    private static boolean useTestDatabase = false;
+    private static Properties props = new Properties();
+    private static boolean testMode = false;
 
     static {
-        try (InputStream in = DBConnection.class.getResourceAsStream("/db.properties")) {
-            if (in == null) {
-                throw new RuntimeException("db.properties not found. Copy db.properties.example and add your password.");
-            }
-            config.load(in);
-        } catch (Exception e) {
-            throw new RuntimeException("Cannot read db.properties", e);
+        InputStream in = DBConnection.class.getResourceAsStream("/db.properties");
+        if (in == null) {
+            throw new RuntimeException("db.properties is missing. Copy db.properties.example and add your password.");
+        }
+        try (in) {
+            props.load(in);
+        } catch (IOException e) {
+            throw new RuntimeException("Could not read db.properties", e);
         }
     }
 
-    /** Call this in tests so all DAOs use the test database instead. */
+    // Tests call this so they use freshlink_test and never touch the real data.
     public static void useTestDatabase() {
-        useTestDatabase = true;
+        testMode = true;
     }
 
     public static Connection getConnection() throws SQLException {
-        String prefix = useTestDatabase ? "db.test." : "db.";
-        return DriverManager.getConnection(
-                config.getProperty(prefix + "url"),
-                config.getProperty(prefix + "user"),
-                config.getProperty(prefix + "password"));
+        String key = testMode ? "db.test." : "db.";
+        return DriverManager.getConnection(props.getProperty(key + "url"),
+                props.getProperty(key + "user"), props.getProperty(key + "password"));
     }
 }

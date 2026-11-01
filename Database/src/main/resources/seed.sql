@@ -1,7 +1,6 @@
 -- FreshLink sample data. Run after schema.sql.
 -- Demo accounts: admin / Admin@123, lan.nguyen / Fresh@123, minh.tran / Fresh@123, hoa.le / Fresh@123
 
-
 -- Users (ids 1-4)
 INSERT INTO users (username, password_hash, password_salt, full_name, email, phone, role) VALUES
 ('admin',      'e6a2db3bc2db60eea0ccb1c6917e84cc28ec9c899c6b81997f0f45ffd8c083c1', 'a1f3c9e27b4d8e60f2a5b7c913d4e6f8', 'Quản trị FreshLink', 'admin@freshlink.vn',  '0900000001', 'ADMIN'),
@@ -14,7 +13,6 @@ INSERT INTO addresses (user_id, receiver_name, phone, street, ward, district, ci
 (2, 'Nguyễn Văn Hùng', '0912000111', '12 Lê Văn Việt',          'Phường Hiệp Phú',      'TP. Thủ Đức',    'TP. Hồ Chí Minh', false),
 (3, 'Trần Văn Minh',  '0987654321', '88 Phan Xích Long',        'Phường 2',             'Quận Phú Nhuận', 'TP. Hồ Chí Minh', true),
 (4, 'Lê Thị Hoa',     '0933221100', 'Lô 3, KDC Mỹ Phước',       'Phường Mỹ Phước',      'TX. Bến Cát',    'Bình Dương',      true);
-
 
 -- Categories: parents 1-6, children 7-22
 INSERT INTO categories (parent_id, name) VALUES
@@ -42,7 +40,6 @@ INSERT INTO categories (parent_id, name) VALUES
 (5, 'Sữa tươi'),
 (5, 'Nước ngọt, nước suối'),
 (6, 'Bánh quy, snack');
-
 
 -- Products (ids 1-33)
 INSERT INTO products (category_id, name, unit, price, sale_price, stock, origin, voucher_eligible, description) VALUES
@@ -80,7 +77,6 @@ INSERT INTO products (category_id, name, unit, price, sale_price, stock, origin,
 (22, 'Bánh quy bơ',                    'Hộp 300g',      65000,   NULL, 35, 'Đan Mạch',    true,  NULL),
 (22, 'Snack khoai tây vị tảo biển',    'Gói 50g',       12000,   NULL,  0, 'Việt Nam',    true,  'Tạm hết hàng.');
 
-
 -- Vouchers (ids 1-5)
 INSERT INTO vouchers (code, description, discount_type, discount_value, min_order_value, max_discount, start_date, end_date, usage_limit, used_count, active) VALUES
 ('FRESH50K',   'Giảm 50.000đ cho đơn từ 300.000đ',             'FIXED',   50000, 300000,  NULL, '2026-01-01 00:00', '2027-12-31 23:59', 1000, 1, true),
@@ -89,10 +85,8 @@ INSERT INTO vouchers (code, description, discount_type, discount_value, min_orde
 ('TET2026',    'Tết 2026: giảm 15% tối đa 50.000đ (đã hết hạn)', 'PERCENT', 15,      0, 50000, '2026-01-20 00:00', '2026-02-20 23:59', NULL, 0, true),
 ('VIP100K',    'Giảm 100.000đ cho đơn từ 500.000đ (đã hết lượt)', 'FIXED', 100000, 500000, NULL, '2026-01-01 00:00', '2027-12-31 23:59',    5, 5, true);
 
--- ----------------------------------------------------------------------------
--- Orders (ids 1-5). total = subtotal - discount_amount + shipping_fee
--- Shipping rule used in the data: free from 300.000đ, otherwise 15.000đ.
--- ----------------------------------------------------------------------------
+-- Orders (ids 1-5). total = subtotal - discount + shipping_fee
+-- shipping is free from 300.000đ, otherwise 15.000đ
 INSERT INTO orders (user_id, receiver_name, receiver_phone, delivery_address, delivery_date, delivery_slot, voucher_id,
                     subtotal, discount, shipping_fee, total, payment_method, payment_status, status, note, created_at) VALUES
 (2, 'Nguyễn Thị Lan', '0912345678', '25 Nguyễn Thị Thập, Phường Tân Phú, Quận 7, TP. Hồ Chí Minh', '2026-10-20', '08:00-10:00', 1,
@@ -141,7 +135,6 @@ INSERT INTO order_tracking (order_id, status, note, created_at) VALUES
 (5, 'PENDING',   'Đơn hàng đã được đặt',              '2026-10-27 21:00'),
 (5, 'CANCELLED', 'Khách hủy đơn, đã hoàn tiền ZaloPay', '2026-10-28 07:45');
 
-
 -- Reviews (only for products in DELIVERED orders)
 INSERT INTO reviews (product_id, user_id, rating, comment, created_at) VALUES
 ( 1, 2, 5, 'Thịt tươi, nạc mỡ đều, kho rất ngon.',       '2026-10-21 12:00'),
@@ -149,7 +142,6 @@ INSERT INTO reviews (product_id, user_id, rating, comment, created_at) VALUES
 (21, 2, 5, 'Gạo thơm, dẻo, sẽ mua lại.',                  '2026-10-21 12:10'),
 ( 7, 3, 4, 'Tôm còn tươi, size đúng mô tả.',              '2026-10-26 08:30'),
 (29, 3, 5, 'Sữa ngon, giao nhanh.',                       '2026-10-26 08:35');
-
 
 -- Recipes (ids 1-4) and ingredients
 INSERT INTO recipes (title, description, instructions, cook_time, servings) VALUES

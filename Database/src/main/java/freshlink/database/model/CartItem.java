@@ -1,6 +1,6 @@
 package freshlink.database.model;
 
-/** One product in a customer's cart, with its current price. */
+// price is the current price (already the sale price if there is one)
 public record CartItem(int userId, int productId, String productName, String unit,
                        long price, int quantity, int stock) {
 

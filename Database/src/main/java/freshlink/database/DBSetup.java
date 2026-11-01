@@ -5,12 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Statement;
 
-/**
- * Creates all tables (schema.sql) and fills them with sample data (seed.sql).
- * Run: mvn compile exec:java              (main database)
- *      mvn compile exec:java -Dexec.args="--test"   (test database)
- * WARNING: this deletes all existing data.
- */
+// Builds the database from schema.sql and fills it with seed.sql.
+// Careful: this deletes everything that is already in the tables!
+//   mvn compile exec:java                          -> freshlink
+//   mvn compile exec:java -Dexec.args="--test"     -> freshlink_test
 public class DBSetup {
 
     public static void main(String[] args) throws Exception {
@@ -29,8 +27,8 @@ public class DBSetup {
         }
     }
 
-    private static String readFile(String path) throws Exception {
-        try (InputStream in = DBSetup.class.getResourceAsStream(path)) {
+    private static String readFile(String name) throws Exception {
+        try (InputStream in = DBSetup.class.getResourceAsStream(name)) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }

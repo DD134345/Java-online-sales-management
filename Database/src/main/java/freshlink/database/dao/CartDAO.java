@@ -10,10 +10,10 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** SQL for the cart_items table. */
+// Queries for the cart_items table (every customer has one cart)
 public class CartDAO {
 
-    /** The customer's cart with product names and current prices (sale price if any). */
+    // the cart with product names and current prices (sale price if there is one)
     public List<CartItem> getCart(int userId) throws SQLException {
         String sql = "SELECT c.user_id, c.product_id, p.name, p.unit, COALESCE(p.sale_price, p.price) AS price, "
                 + "c.quantity, p.stock FROM cart_items c JOIN products p ON p.product_id = c.product_id "
@@ -31,7 +31,7 @@ public class CartDAO {
         return cart;
     }
 
-    /** Adds a product. If it is already in the cart, the quantity is increased. */
+    // if the product is already in the cart, the quantity just goes up
     public void addToCart(int userId, int productId, int quantity) throws SQLException {
         String sql = "INSERT INTO cart_items (user_id, product_id, quantity) VALUES (?, ?, ?) "
                 + "ON CONFLICT (user_id, product_id) DO UPDATE SET quantity = cart_items.quantity + EXCLUDED.quantity";
@@ -44,7 +44,7 @@ public class CartDAO {
         }
     }
 
-    /** Sets the quantity. A quantity of 0 removes the product. */
+    // quantity 0 removes the product from the cart
     public void updateQuantity(int userId, int productId, int quantity) throws SQLException {
         if (quantity <= 0) {
             removeFromCart(userId, productId);
@@ -61,9 +61,8 @@ public class CartDAO {
     }
 
     public void removeFromCart(int userId, int productId) throws SQLException {
-        String sql = "DELETE FROM cart_items WHERE user_id = ? AND product_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("DELETE FROM cart_items WHERE user_id = ? AND product_id = ?")) {
             ps.setInt(1, userId);
             ps.setInt(2, productId);
             ps.executeUpdate();
@@ -71,9 +70,8 @@ public class CartDAO {
     }
 
     public void clearCart(int userId) throws SQLException {
-        String sql = "DELETE FROM cart_items WHERE user_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("DELETE FROM cart_items WHERE user_id = ?")) {
             ps.setInt(1, userId);
             ps.executeUpdate();
         }

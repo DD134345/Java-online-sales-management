@@ -14,49 +14,45 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** SQL for orders, order_items and order_tracking, including checkout. */
+// Queries for orders, order_items and order_tracking. This is also where checkout happens.
 public class OrderDAO {
 
-    // ===================== Checkout =====================
+    // ---------- checkout ----------
 
-    /**
-     * Turns the customer's cart into an order.
-     * Fill in userId, receiver, address, delivery date/slot, payment method, shipping fee and note
-     * in orderInfo; the other fields (ids, prices, totals, status) are ignored and calculated here.
-     *
-     * Everything runs in ONE transaction: if a product is out of stock or the voucher is
-     * not valid, nothing is saved and an exception with the reason is thrown.
-     *
-     * @param voucherCode null or "" for no voucher
-     * @return the saved order (with its new orderId and totals)
-     */
+    // Turns the customer's whole cart into an order.
+    // In orderInfo only these fields are used: userId, receiverName, receiverPhone, deliveryAddress,
+    // deliveryDate, deliverySlot, shippingFee, paymentMethod and note. Prices and totals are worked out here.
+    // voucherCode can be null or "" if the customer has no voucher.
+    //
+    // Everything happens in one transaction. If something is wrong (empty cart, not enough stock,
+    // bad voucher) we roll back, nothing is saved, and the exception message says why (in Vietnamese).
     public Order placeOrder(Order orderInfo, String voucherCode) throws SQLException {
         int userId = orderInfo.userId();
         Connection conn = DBConnection.getConnection();
         try {
-            conn.setAutoCommit(false); // start transaction
+            conn.setAutoCommit(false);
 
-            // 1. Read the cart and lock the product rows so nobody else can buy the same stock.
+            // 1. read the cart. FOR UPDATE locks the products so two people can't buy the last item at the same time
             String cartSql = "SELECT p.product_id, p.name, COALESCE(p.sale_price, p.price) AS price, p.stock, "
                     + "p.active, p.voucher_eligible, c.quantity FROM cart_items c "
                     + "JOIN products p ON p.product_id = c.product_id WHERE c.user_id = ? "
                     + "ORDER BY p.product_id FOR UPDATE OF p";
             List<OrderItem> items = new ArrayList<>();
             long subtotal = 0;
-            long voucherValue = 0; // value of products that accept vouchers
+            long voucherValue = 0;   // only products that allow vouchers count for the discount
             try (PreparedStatement ps = conn.prepareStatement(cartSql)) {
                 ps.setInt(1, userId);
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
                     String name = rs.getString("name");
                     int quantity = rs.getInt("quantity");
+                    int stock = rs.getInt("stock");
                     long price = rs.getLong("price");
                     if (!rs.getBoolean("active")) {
-                        throw new IllegalStateException(name + " is no longer sold");
+                        throw new IllegalStateException(name + " đã ngừng bán");
                     }
-                    if (rs.getInt("stock") < quantity) {
-                        throw new IllegalStateException("Not enough stock for " + name
-                                + " (only " + rs.getInt("stock") + " left)");
+                    if (stock < quantity) {
+                        throw new IllegalStateException(name + " chỉ còn " + stock + ", không đủ số lượng");
                     }
                     items.add(new OrderItem(0, 0, rs.getInt("product_id"), name, price, quantity));
                     subtotal += price * quantity;
@@ -66,26 +62,26 @@ public class OrderDAO {
                 }
             }
             if (items.isEmpty()) {
-                throw new IllegalStateException("The cart is empty");
+                throw new IllegalStateException("Giỏ hàng đang trống");
             }
 
-            // 2. Voucher
+            // 2. voucher
             Integer voucherId = null;
             long discount = 0;
             if (voucherCode != null && !voucherCode.isBlank()) {
                 Voucher v;
-                String voucherSql = "SELECT * FROM vouchers WHERE UPPER(code) = UPPER(?) FOR UPDATE";
-                try (PreparedStatement ps = conn.prepareStatement(voucherSql)) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT * FROM vouchers WHERE UPPER(code) = UPPER(?) FOR UPDATE")) {
                     ps.setString(1, voucherCode.trim());
-                    ResultSet rs = ps.executeQuery();
-                    if (!rs.next()) {
-                        throw new IllegalArgumentException("Voucher " + voucherCode + " does not exist");
+                    List<Voucher> found = VoucherDAO.readVouchers(ps.executeQuery());
+                    if (found.isEmpty()) {
+                        throw new IllegalArgumentException("Mã giảm giá " + voucherCode + " không tồn tại");
                     }
-                    v = VoucherDAO.toVoucher(rs);
+                    v = found.get(0);
                 }
-                String error = VoucherDAO.checkVoucher(v, voucherValue);
-                if (error != null) {
-                    throw new IllegalArgumentException(error);
+                String problem = VoucherDAO.checkVoucher(v, voucherValue);
+                if (problem != null) {
+                    throw new IllegalArgumentException(problem);
                 }
                 voucherId = v.voucherId();
                 discount = VoucherDAO.calculateDiscount(v, voucherValue);
@@ -96,7 +92,7 @@ public class OrderDAO {
                 }
             }
 
-            // 3. Save the order
+            // 3. the order itself
             long total = subtotal - discount + orderInfo.shippingFee();
             int orderId;
             String orderSql = "INSERT INTO orders (user_id, receiver_name, receiver_phone, delivery_address, "
@@ -118,10 +114,10 @@ public class OrderDAO {
                 ps.setString(13, orderInfo.note());
                 ResultSet rs = ps.executeQuery();
                 rs.next();
-                orderId = rs.getInt("order_id");
+                orderId = rs.getInt(1);
             }
 
-            // 4. Save the order items and take the products out of stock
+            // 4. order items, and take them out of stock
             for (OrderItem item : items) {
                 try (PreparedStatement ps = conn.prepareStatement("INSERT INTO order_items "
                         + "(order_id, product_id, product_name, unit_price, quantity) VALUES (?, ?, ?, ?, ?)")) {
@@ -140,50 +136,49 @@ public class OrderDAO {
                 }
             }
 
-            // 5. First tracking step, then empty the cart
+            // 5. first tracking step, then empty the cart
             addTracking(conn, orderId, "PENDING", "Đơn hàng đã được đặt");
             try (PreparedStatement ps = conn.prepareStatement("DELETE FROM cart_items WHERE user_id = ?")) {
                 ps.setInt(1, userId);
                 ps.executeUpdate();
             }
 
-            conn.commit(); // everything OK: save
+            conn.commit();
             return getOrderById(orderId);
         } catch (SQLException | RuntimeException e) {
-            conn.rollback(); // something failed: undo everything
+            conn.rollback();
             throw e;
         } finally {
             conn.close();
         }
     }
 
-    // ===================== Read orders =====================
+    // ---------- reading orders ----------
 
     public Order getOrderById(int orderId) throws SQLException {
-        List<Order> list = getOrders("SELECT * FROM orders WHERE order_id = ?", orderId);
+        List<Order> list = findOrders("SELECT * FROM orders WHERE order_id = ?", orderId);
         return list.isEmpty() ? null : list.get(0);
     }
 
-    /** A customer's order history, newest first. */
+    // order history of one customer, newest first
     public List<Order> getOrdersByUser(int userId) throws SQLException {
-        return getOrders("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", userId);
+        return findOrders("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", userId);
     }
 
-    /** Admin: all orders, newest first. */
+    // admin: every order, newest first
     public List<Order> getAllOrders() throws SQLException {
-        return getOrders("SELECT * FROM orders ORDER BY created_at DESC", null);
+        return findOrders("SELECT * FROM orders ORDER BY created_at DESC", null);
     }
 
-    /** Admin: orders with one status, e.g. all "PENDING" orders. */
+    // admin: e.g. getOrdersByStatus("PENDING") for the orders that still need confirming
     public List<Order> getOrdersByStatus(String status) throws SQLException {
-        return getOrders("SELECT * FROM orders WHERE status = ? ORDER BY created_at", status);
+        return findOrders("SELECT * FROM orders WHERE status = ? ORDER BY created_at", status);
     }
 
     public List<OrderItem> getOrderItems(int orderId) throws SQLException {
-        String sql = "SELECT * FROM order_items WHERE order_id = ? ORDER BY order_item_id";
         List<OrderItem> list = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM order_items WHERE order_id = ? ORDER BY order_item_id")) {
             ps.setInt(1, orderId);
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
@@ -194,7 +189,7 @@ public class OrderDAO {
         return list;
     }
 
-    /** Delivery timeline of an order, oldest step first. */
+    // the delivery timeline, oldest step first
     public List<OrderTracking> getTracking(int orderId) throws SQLException {
         String sql = "SELECT * FROM order_tracking WHERE order_id = ? ORDER BY created_at, tracking_id";
         List<OrderTracking> list = new ArrayList<>();
@@ -210,17 +205,13 @@ public class OrderDAO {
         return list;
     }
 
-    // ===================== Change status =====================
+    // ---------- changing the status ----------
 
-    /**
-     * Moves an order to the next status and adds a tracking step.
-     * Allowed: PENDING -> CONFIRMED -> PACKING -> SHIPPING -> DELIVERED,
-     * and CANCELLED from any status before SHIPPING.
-     * Cancelling puts the products back in stock, gives the voucher use back, and refunds a paid order.
-     * Delivering a COD (cash) order marks it as PAID.
-     *
-     * @return false if the order does not exist or the change is not allowed
-     */
+    // Moves the order to its next status and adds a tracking step.
+    // Order of steps: PENDING -> CONFIRMED -> PACKING -> SHIPPING -> DELIVERED (or CANCELLED before SHIPPING).
+    // Cancelling puts the products back in stock, gives back the voucher use and refunds a paid order.
+    // When a COD order is delivered, the cash has been collected, so it becomes PAID.
+    // Returns false if the order doesn't exist or the step isn't allowed.
     public boolean updateStatus(int orderId, String newStatus, String note) throws SQLException {
         Order order = getOrderById(orderId);
         if (order == null || !canChangeStatus(order.status(), newStatus)) {
@@ -269,11 +260,10 @@ public class OrderDAO {
         }
     }
 
-    /** paymentStatus: "UNPAID", "PAID" or "REFUNDED". */
+    // paymentStatus is "UNPAID", "PAID" or "REFUNDED"
     public boolean updatePaymentStatus(int orderId, String paymentStatus) throws SQLException {
-        String sql = "UPDATE orders SET payment_status = ? WHERE order_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("UPDATE orders SET payment_status = ? WHERE order_id = ?")) {
             ps.setString(1, paymentStatus);
             ps.setInt(2, orderId);
             return ps.executeUpdate() > 0;
@@ -286,15 +276,15 @@ public class OrderDAO {
             case "CONFIRMED": return to.equals("PACKING") || to.equals("CANCELLED");
             case "PACKING":   return to.equals("SHIPPING") || to.equals("CANCELLED");
             case "SHIPPING":  return to.equals("DELIVERED");
-            default:          return false; // DELIVERED and CANCELLED are final
+            default:          return false; // DELIVERED and CANCELLED are the end
         }
     }
 
-    // ===================== Helpers =====================
+    // ---------- helpers ----------
 
     private void addTracking(Connection conn, int orderId, String status, String note) throws SQLException {
-        String sql = "INSERT INTO order_tracking (order_id, status, note) VALUES (?, ?, ?)";
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO order_tracking (order_id, status, note) VALUES (?, ?, ?)")) {
             ps.setInt(1, orderId);
             ps.setString(2, status);
             ps.setString(3, note);
@@ -302,8 +292,8 @@ public class OrderDAO {
         }
     }
 
-    /** Runs an order query with zero or one parameter. */
-    private List<Order> getOrders(String sql, Object param) throws SQLException {
+    // runs an orders query that has one parameter (or none, if param is null)
+    private List<Order> findOrders(String sql, Object param) throws SQLException {
         List<Order> list = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
