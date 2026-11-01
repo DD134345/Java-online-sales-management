@@ -10,10 +10,10 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** SQL for the reviews table. */
+// Queries for the reviews table
 public class ReviewDAO {
 
-    /** Reviews of a product with the reviewer's name, newest first. */
+    // newest first, with the name of the person who wrote it
     public List<Review> getReviews(int productId) throws SQLException {
         String sql = "SELECT r.*, u.full_name FROM reviews r JOIN users u ON u.user_id = r.user_id "
                 + "WHERE r.product_id = ? ORDER BY r.created_at DESC";
@@ -31,11 +31,10 @@ public class ReviewDAO {
         return list;
     }
 
-    /** Average stars of a product, or 0 if it has no reviews. */
+    // 0 if nobody reviewed it yet
     public double getAverageRating(int productId) throws SQLException {
-        String sql = "SELECT COALESCE(AVG(rating), 0) FROM reviews WHERE product_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("SELECT COALESCE(AVG(rating), 0) FROM reviews WHERE product_id = ?")) {
             ps.setInt(1, productId);
             ResultSet rs = ps.executeQuery();
             rs.next();
@@ -43,7 +42,7 @@ public class ReviewDAO {
         }
     }
 
-    /** A customer may only review a product from one of their DELIVERED orders. */
+    // you can only review something you actually received (an order with status DELIVERED)
     public boolean canReview(int userId, int productId) throws SQLException {
         String sql = "SELECT COUNT(*) FROM orders o JOIN order_items oi ON oi.order_id = o.order_id "
                 + "WHERE o.user_id = ? AND oi.product_id = ? AND o.status = 'DELIVERED'";
@@ -57,11 +56,8 @@ public class ReviewDAO {
         }
     }
 
-    /**
-     * Saves a review. If the customer already reviewed this product, the old review is replaced.
-     *
-     * @return false if the customer is not allowed to review this product
-     */
+    // Saves the review. If the customer already reviewed this product, the old one is replaced.
+    // Returns false if they're not allowed to review it (see canReview).
     public boolean addReview(Review review) throws SQLException {
         if (!canReview(review.userId(), review.productId())) {
             return false;
@@ -81,9 +77,8 @@ public class ReviewDAO {
     }
 
     public boolean deleteReview(int reviewId) throws SQLException {
-        String sql = "DELETE FROM reviews WHERE review_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("DELETE FROM reviews WHERE review_id = ?")) {
             ps.setInt(1, reviewId);
             return ps.executeUpdate() > 0;
         }

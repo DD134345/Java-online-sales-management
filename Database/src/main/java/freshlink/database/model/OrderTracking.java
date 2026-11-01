@@ -2,6 +2,6 @@ package freshlink.database.model;
 
 import java.time.LocalDateTime;
 
-/** One step of an order's delivery timeline. */
+// one step in the delivery timeline of an order
 public record OrderTracking(int trackingId, int orderId, String status, String note, LocalDateTime createdAt) {
 }

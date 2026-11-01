@@ -11,28 +11,35 @@ import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
-/** SQL for the vouchers table, plus the voucher rules used at checkout. */
+// Queries for the vouchers table + the rules for using a voucher
 public class VoucherDAO {
 
     public List<Voucher> getAllVouchers() throws SQLException {
-        return getVouchers("SELECT * FROM vouchers ORDER BY end_date DESC");
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM vouchers ORDER BY end_date DESC")) {
+            return readVouchers(ps.executeQuery());
+        }
     }
 
-    /** Vouchers a customer can use right now. */
+    // vouchers that can be used right now
     public List<Voucher> getAvailableVouchers() throws SQLException {
-        return getVouchers("SELECT * FROM vouchers WHERE active AND NOW() BETWEEN start_date AND end_date "
-                + "AND (usage_limit IS NULL OR used_count < usage_limit) ORDER BY min_order_value");
-    }
-
-    /** Returns null if the code does not exist. Not case-sensitive. */
-    public Voucher getVoucherByCode(String code) throws SQLException {
-        String sql = "SELECT * FROM vouchers WHERE UPPER(code) = UPPER(?)";
+        String sql = "SELECT * FROM vouchers WHERE active AND NOW() BETWEEN start_date AND end_date "
+                + "AND (usage_limit IS NULL OR used_count < usage_limit) ORDER BY min_order_value";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
+            return readVouchers(ps.executeQuery());
+        }
+    }
+
+    // returns null if the code doesn't exist ("fresh50k" works the same as "FRESH50K")
+    public Voucher getVoucherByCode(String code) throws SQLException {
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM vouchers WHERE UPPER(code) = UPPER(?)")) {
             ps.setString(1, code.trim());
-            ResultSet rs = ps.executeQuery();
-            return rs.next() ? toVoucher(rs) : null;
+            List<Voucher> list = readVouchers(ps.executeQuery());
+            return list.isEmpty() ? null : list.get(0);
         }
     }
 
@@ -52,42 +59,41 @@ public class VoucherDAO {
             ps.setObject(9, v.usageLimit());
             ResultSet rs = ps.executeQuery();
             rs.next();
-            return rs.getInt("voucher_id");
+            return rs.getInt(1);
         }
     }
 
     public boolean setActive(int voucherId, boolean active) throws SQLException {
-        String sql = "UPDATE vouchers SET active = ? WHERE voucher_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("UPDATE vouchers SET active = ? WHERE voucher_id = ?")) {
             ps.setBoolean(1, active);
             ps.setInt(2, voucherId);
             return ps.executeUpdate() > 0;
         }
     }
 
-    // ===================== Voucher rules =====================
-    // These are static so the Controller can also use them to preview the discount in the cart.
+    // ---------- voucher rules ----------
+    // static, so the Controller can also use them to show the discount in the cart before checkout
 
-    /** Returns an error message if the voucher cannot be used, or null if it is OK. */
+    // returns null if the voucher is OK, otherwise the reason (in Vietnamese, ready to show to the customer)
     public static String checkVoucher(Voucher v, long orderValue) {
         LocalDateTime now = LocalDateTime.now();
         if (!v.active()) {
-            return "This voucher is no longer available";
+            return "Mã giảm giá này không còn sử dụng được";
         }
         if (now.isBefore(v.startDate()) || now.isAfter(v.endDate())) {
-            return "This voucher has expired or is not valid yet";
+            return "Mã giảm giá đã hết hạn hoặc chưa đến ngày sử dụng";
         }
         if (v.usageLimit() != null && v.usedCount() >= v.usageLimit()) {
-            return "This voucher has been fully used";
+            return "Mã giảm giá đã hết lượt sử dụng";
         }
         if (orderValue < v.minOrderValue()) {
-            return "The order must be at least " + v.minOrderValue() + " VND to use this voucher";
+            return String.format(Locale.GERMANY, "Đơn hàng cần tối thiểu %,dđ để dùng mã này", v.minOrderValue());
         }
         return null;
     }
 
-    /** How many VND the voucher takes off an order of the given value. */
+    // how much money the voucher takes off (never more than the order itself)
     public static long calculateDiscount(Voucher v, long orderValue) {
         long discount;
         if (v.discountType().equals("PERCENT")) {
@@ -101,24 +107,16 @@ public class VoucherDAO {
         return Math.min(discount, orderValue);
     }
 
-    private List<Voucher> getVouchers(String sql) throws SQLException {
+    // not private because OrderDAO uses it too
+    static List<Voucher> readVouchers(ResultSet rs) throws SQLException {
         List<Voucher> list = new ArrayList<>();
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(toVoucher(rs));
-            }
+        while (rs.next()) {
+            list.add(new Voucher(rs.getInt("voucher_id"), rs.getString("code"), rs.getString("description"),
+                    rs.getString("discount_type"), rs.getLong("discount_value"), rs.getLong("min_order_value"),
+                    rs.getObject("max_discount", Long.class),
+                    rs.getTimestamp("start_date").toLocalDateTime(), rs.getTimestamp("end_date").toLocalDateTime(),
+                    rs.getObject("usage_limit", Integer.class), rs.getInt("used_count"), rs.getBoolean("active")));
         }
         return list;
-    }
-
-    /** Package-private so OrderDAO can reuse it. */
-    static Voucher toVoucher(ResultSet rs) throws SQLException {
-        return new Voucher(rs.getInt("voucher_id"), rs.getString("code"), rs.getString("description"),
-                rs.getString("discount_type"), rs.getLong("discount_value"), rs.getLong("min_order_value"),
-                rs.getObject("max_discount", Long.class),
-                rs.getTimestamp("start_date").toLocalDateTime(), rs.getTimestamp("end_date").toLocalDateTime(),
-                rs.getObject("usage_limit", Integer.class), rs.getInt("used_count"), rs.getBoolean("active"));
     }
 }

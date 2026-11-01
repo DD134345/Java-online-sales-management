@@ -11,19 +11,19 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** SQL for the users and addresses tables. */
+// Queries for the users and addresses tables
 public class UserDAO {
 
-    // ===================== Users =====================
+    // ---------- users ----------
 
-    /** Used for login. Returns null if the username does not exist. */
+    // for login, returns null if the username doesn't exist
     public User getUserByUsername(String username) throws SQLException {
         String sql = "SELECT * FROM users WHERE LOWER(username) = LOWER(?)";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, username);
-            ResultSet rs = ps.executeQuery();
-            return rs.next() ? toUser(rs) : null;
+            List<User> users = readUsers(ps.executeQuery());
+            return users.isEmpty() ? null : users.get(0);
         }
     }
 
@@ -32,25 +32,19 @@ public class UserDAO {
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, userId);
-            ResultSet rs = ps.executeQuery();
-            return rs.next() ? toUser(rs) : null;
+            List<User> users = readUsers(ps.executeQuery());
+            return users.isEmpty() ? null : users.get(0);
         }
     }
 
     public List<User> getAllUsers() throws SQLException {
-        String sql = "SELECT * FROM users ORDER BY user_id";
-        List<User> users = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                users.add(toUser(rs));
-            }
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM users ORDER BY user_id")) {
+            return readUsers(ps.executeQuery());
         }
-        return users;
     }
 
-    /** Registers a new account and returns its new user_id. */
+    // returns the id of the new user
     public int addUser(User user) throws SQLException {
         String sql = "INSERT INTO users (username, password_hash, password_salt, full_name, email, phone, role) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING user_id";
@@ -65,11 +59,11 @@ public class UserDAO {
             ps.setString(7, user.role() == null ? "CUSTOMER" : user.role());
             ResultSet rs = ps.executeQuery();
             rs.next();
-            return rs.getInt("user_id");
+            return rs.getInt(1);
         }
     }
 
-    /** Updates name, email and phone. */
+    // only name, email and phone can be changed here
     public boolean updateProfile(User user) throws SQLException {
         String sql = "UPDATE users SET full_name = ?, email = ?, phone = ? WHERE user_id = ?";
         try (Connection conn = DBConnection.getConnection();
@@ -93,7 +87,7 @@ public class UserDAO {
         }
     }
 
-    /** Admin: lock (false) or unlock (true) an account. */
+    // admin: false = lock the account, true = unlock it
     public boolean setActive(int userId, boolean active) throws SQLException {
         String sql = "UPDATE users SET active = ? WHERE user_id = ?";
         try (Connection conn = DBConnection.getConnection();
@@ -104,9 +98,9 @@ public class UserDAO {
         }
     }
 
-    // ===================== Addresses =====================
+    // ---------- addresses ----------
 
-    /** All addresses of a customer, the default one first. */
+    // the default address comes first
     public List<Address> getAddresses(int userId) throws SQLException {
         String sql = "SELECT * FROM addresses WHERE user_id = ? ORDER BY is_default DESC, address_id";
         List<Address> list = new ArrayList<>();
@@ -124,11 +118,11 @@ public class UserDAO {
         return list;
     }
 
-    /** Adds an address. The first address of a customer becomes the default. Returns the new id. */
+    // a customer's first address automatically becomes the default one
     public int addAddress(Address a) throws SQLException {
-        boolean isDefault = a.isDefault() || getAddresses(a.userId()).isEmpty();
-        if (isDefault) {
-            clearDefaultAddress(a.userId());
+        boolean makeDefault = a.isDefault() || getAddresses(a.userId()).isEmpty();
+        if (makeDefault) {
+            clearDefault(a.userId());
         }
         String sql = "INSERT INTO addresses (user_id, receiver_name, phone, street, ward, district, city, is_default) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING address_id";
@@ -141,15 +135,15 @@ public class UserDAO {
             ps.setString(5, a.ward());
             ps.setString(6, a.district());
             ps.setString(7, a.city());
-            ps.setBoolean(8, isDefault);
+            ps.setBoolean(8, makeDefault);
             ResultSet rs = ps.executeQuery();
             rs.next();
-            return rs.getInt("address_id");
+            return rs.getInt(1);
         }
     }
 
     public boolean setDefaultAddress(int userId, int addressId) throws SQLException {
-        clearDefaultAddress(userId);
+        clearDefault(userId);
         String sql = "UPDATE addresses SET is_default = TRUE WHERE address_id = ? AND user_id = ?";
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -159,6 +153,7 @@ public class UserDAO {
         }
     }
 
+    // userId is checked too, so nobody can delete someone else's address
     public boolean deleteAddress(int userId, int addressId) throws SQLException {
         String sql = "DELETE FROM addresses WHERE address_id = ? AND user_id = ?";
         try (Connection conn = DBConnection.getConnection();
@@ -169,19 +164,22 @@ public class UserDAO {
         }
     }
 
-    private void clearDefaultAddress(int userId) throws SQLException {
-        String sql = "UPDATE addresses SET is_default = FALSE WHERE user_id = ?";
+    private void clearDefault(int userId) throws SQLException {
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("UPDATE addresses SET is_default = FALSE WHERE user_id = ?")) {
             ps.setInt(1, userId);
             ps.executeUpdate();
         }
     }
 
-    private User toUser(ResultSet rs) throws SQLException {
-        return new User(rs.getInt("user_id"), rs.getString("username"), rs.getString("password_hash"),
-                rs.getString("password_salt"), rs.getString("full_name"), rs.getString("email"),
-                rs.getString("phone"), rs.getString("role"), rs.getBoolean("active"),
-                rs.getTimestamp("created_at").toLocalDateTime());
+    private List<User> readUsers(ResultSet rs) throws SQLException {
+        List<User> list = new ArrayList<>();
+        while (rs.next()) {
+            list.add(new User(rs.getInt("user_id"), rs.getString("username"), rs.getString("password_hash"),
+                    rs.getString("password_salt"), rs.getString("full_name"), rs.getString("email"),
+                    rs.getString("phone"), rs.getString("role"), rs.getBoolean("active"),
+                    rs.getTimestamp("created_at").toLocalDateTime()));
+        }
+        return list;
     }
 }

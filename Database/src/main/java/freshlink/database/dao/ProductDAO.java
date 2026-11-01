@@ -11,20 +11,30 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** SQL for the categories and products tables. */
+// Queries for the categories and products tables
 public class ProductDAO {
 
-    // ===================== Categories =====================
+    // ---------- categories ----------
 
-    /** Main categories (no parent), for the menu. */
+    // the main menu: categories without a parent
     public List<Category> getMainCategories() throws SQLException {
-        return getCategories("SELECT * FROM categories WHERE parent_id IS NULL ORDER BY category_id", null);
+        String sql = "SELECT * FROM categories WHERE parent_id IS NULL ORDER BY category_id";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            return readCategories(ps.executeQuery());
+        }
     }
 
     public List<Category> getSubCategories(int parentId) throws SQLException {
-        return getCategories("SELECT * FROM categories WHERE parent_id = ? ORDER BY category_id", parentId);
+        String sql = "SELECT * FROM categories WHERE parent_id = ? ORDER BY category_id";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, parentId);
+            return readCategories(ps.executeQuery());
+        }
     }
 
+    // parentId = null to make a main category
     public int addCategory(String name, Integer parentId) throws SQLException {
         String sql = "INSERT INTO categories (name, parent_id) VALUES (?, ?) RETURNING category_id";
         try (Connection conn = DBConnection.getConnection();
@@ -33,94 +43,68 @@ public class ProductDAO {
             ps.setObject(2, parentId);
             ResultSet rs = ps.executeQuery();
             rs.next();
-            return rs.getInt("category_id");
+            return rs.getInt(1);
         }
     }
 
-    private List<Category> getCategories(String sql, Integer parentId) throws SQLException {
-        List<Category> list = new ArrayList<>();
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            if (parentId != null) {
-                ps.setInt(1, parentId);
-            }
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(new Category(rs.getInt("category_id"),
-                        rs.getObject("parent_id", Integer.class), rs.getString("name")));
-            }
-        }
-        return list;
-    }
+    // ---------- products ----------
 
-    // ===================== Products =====================
-
-    /** Admin: every product, including hidden ones. */
+    // for the admin screen, hidden products included
     public List<Product> getAllProducts() throws SQLException {
-        return getProducts("SELECT * FROM products ORDER BY product_id");
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM products ORDER BY product_id")) {
+            return readProducts(ps.executeQuery());
+        }
     }
 
     public Product getProductById(int productId) throws SQLException {
-        String sql = "SELECT * FROM products WHERE product_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM products WHERE product_id = ?")) {
             ps.setInt(1, productId);
-            ResultSet rs = ps.executeQuery();
-            return rs.next() ? toProduct(rs) : null;
+            List<Product> list = readProducts(ps.executeQuery());
+            return list.isEmpty() ? null : list.get(0);
         }
     }
 
-    /** Products of a category. For a main category this also includes its sub-categories. */
+    // for a main category this also returns the products of its sub-categories
     public List<Product> getProductsByCategory(int categoryId) throws SQLException {
         String sql = "SELECT * FROM products WHERE active AND (category_id = ? "
                 + "OR category_id IN (SELECT category_id FROM categories WHERE parent_id = ?)) ORDER BY name";
-        List<Product> list = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, categoryId);
             ps.setInt(2, categoryId);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(toProduct(rs));
-            }
+            return readProducts(ps.executeQuery());
         }
-        return list;
     }
 
-    /** Search by name, not case-sensitive. */
     public List<Product> searchProducts(String keyword) throws SQLException {
         String sql = "SELECT * FROM products WHERE active AND LOWER(name) LIKE LOWER(?) ORDER BY name";
-        List<Product> list = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, "%" + keyword.trim() + "%");
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(toProduct(rs));
-            }
+            return readProducts(ps.executeQuery());
         }
-        return list;
     }
 
-    /** "Khuyen mai hot": products on sale, biggest discount first. */
+    // "Khuyến mãi hot" - products on sale, biggest discount first
     public List<Product> getSaleProducts() throws SQLException {
-        return getProducts("SELECT * FROM products WHERE active AND sale_price IS NOT NULL "
-                + "ORDER BY (price - sale_price) * 1.0 / price DESC");
+        String sql = "SELECT * FROM products WHERE active AND sale_price IS NOT NULL "
+                + "ORDER BY (price - sale_price) * 1.0 / price DESC";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            return readProducts(ps.executeQuery());
+        }
     }
 
-    /** Admin warning: products with stock at or below the limit. */
+    // for the admin's low stock warning
     public List<Product> getLowStockProducts(int limit) throws SQLException {
         String sql = "SELECT * FROM products WHERE active AND stock <= ? ORDER BY stock";
-        List<Product> list = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setInt(1, limit);
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(toProduct(rs));
-            }
+            return readProducts(ps.executeQuery());
         }
-        return list;
     }
 
     public int addProduct(Product p) throws SQLException {
@@ -140,7 +124,7 @@ public class ProductDAO {
             ps.setBoolean(10, p.voucherEligible());
             ResultSet rs = ps.executeQuery();
             rs.next();
-            return rs.getInt("product_id");
+            return rs.getInt(1);
         }
     }
 
@@ -166,7 +150,7 @@ public class ProductDAO {
         }
     }
 
-    /** Admin: add stock (positive number) or remove stock (negative). Stock cannot go below 0. */
+    // amount > 0 adds stock, amount < 0 removes it. Returns false if stock would go below 0.
     public boolean changeStock(int productId, int amount) throws SQLException {
         String sql = "UPDATE products SET stock = stock + ? WHERE product_id = ? AND stock + ? >= 0";
         try (Connection conn = DBConnection.getConnection();
@@ -178,22 +162,23 @@ public class ProductDAO {
         }
     }
 
-    private List<Product> getProducts(String sql) throws SQLException {
-        List<Product> list = new ArrayList<>();
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(toProduct(rs));
-            }
+    private List<Category> readCategories(ResultSet rs) throws SQLException {
+        List<Category> list = new ArrayList<>();
+        while (rs.next()) {
+            list.add(new Category(rs.getInt("category_id"), rs.getObject("parent_id", Integer.class),
+                    rs.getString("name")));
         }
         return list;
     }
 
-    private Product toProduct(ResultSet rs) throws SQLException {
-        return new Product(rs.getInt("product_id"), rs.getInt("category_id"), rs.getString("name"),
-                rs.getString("unit"), rs.getLong("price"), rs.getObject("sale_price", Long.class),
-                rs.getInt("stock"), rs.getString("origin"), rs.getString("description"),
-                rs.getString("image_url"), rs.getBoolean("voucher_eligible"), rs.getBoolean("active"));
+    private List<Product> readProducts(ResultSet rs) throws SQLException {
+        List<Product> list = new ArrayList<>();
+        while (rs.next()) {
+            list.add(new Product(rs.getInt("product_id"), rs.getInt("category_id"), rs.getString("name"),
+                    rs.getString("unit"), rs.getLong("price"), rs.getObject("sale_price", Long.class),
+                    rs.getInt("stock"), rs.getString("origin"), rs.getString("description"),
+                    rs.getString("image_url"), rs.getBoolean("voucher_eligible"), rs.getBoolean("active")));
+        }
+        return list;
     }
 }

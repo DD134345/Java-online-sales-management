@@ -11,35 +11,48 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** SQL for the recipes and recipe_ingredients tables. */
+// Queries for the recipes and recipe_ingredients tables
 public class RecipeDAO {
 
     public List<Recipe> getAllRecipes() throws SQLException {
-        return getRecipes("SELECT * FROM recipes ORDER BY recipe_id", null);
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM recipes ORDER BY recipe_id")) {
+            return readRecipes(ps.executeQuery());
+        }
     }
 
     public Recipe getRecipeById(int recipeId) throws SQLException {
-        List<Recipe> list = getRecipes("SELECT * FROM recipes WHERE recipe_id = ?", recipeId);
-        return list.isEmpty() ? null : list.get(0);
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM recipes WHERE recipe_id = ?")) {
+            ps.setInt(1, recipeId);
+            List<Recipe> list = readRecipes(ps.executeQuery());
+            return list.isEmpty() ? null : list.get(0);
+        }
     }
 
-    /** Search by title, not case-sensitive. */
     public List<Recipe> searchRecipes(String keyword) throws SQLException {
-        return getRecipes("SELECT * FROM recipes WHERE LOWER(title) LIKE LOWER(?) ORDER BY title",
-                "%" + keyword.trim() + "%");
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM recipes WHERE LOWER(title) LIKE LOWER(?) ORDER BY title")) {
+            ps.setString(1, "%" + keyword.trim() + "%");
+            return readRecipes(ps.executeQuery());
+        }
     }
 
-    /** Recipes that use a product, to show "Món ngon với sản phẩm này" on the product page. */
+    // recipes that use this product, for "Món ngon với sản phẩm này" on the product page
     public List<Recipe> getRecipesByProduct(int productId) throws SQLException {
-        return getRecipes("SELECT * FROM recipes WHERE recipe_id IN "
-                + "(SELECT recipe_id FROM recipe_ingredients WHERE product_id = ?) ORDER BY title", productId);
+        String sql = "SELECT * FROM recipes WHERE recipe_id IN "
+                + "(SELECT recipe_id FROM recipe_ingredients WHERE product_id = ?) ORDER BY title";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, productId);
+            return readRecipes(ps.executeQuery());
+        }
     }
 
     public List<RecipeIngredient> getIngredients(int recipeId) throws SQLException {
-        String sql = "SELECT * FROM recipe_ingredients WHERE recipe_id = ? ORDER BY ingredient_id";
         List<RecipeIngredient> list = new ArrayList<>();
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("SELECT * FROM recipe_ingredients WHERE recipe_id = ? ORDER BY ingredient_id")) {
             ps.setInt(1, recipeId);
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
@@ -50,7 +63,7 @@ public class RecipeDAO {
         return list;
     }
 
-    /** Saves a recipe and its ingredients together. Returns the new recipe_id. */
+    // saves the recipe and all its ingredients together, returns the new recipe id
     public int addRecipe(Recipe recipe, List<RecipeIngredient> ingredients) throws SQLException {
         Connection conn = DBConnection.getConnection();
         try {
@@ -66,7 +79,7 @@ public class RecipeDAO {
                 ps.setInt(5, recipe.servings());
                 ResultSet rs = ps.executeQuery();
                 rs.next();
-                recipeId = rs.getInt("recipe_id");
+                recipeId = rs.getInt(1);
             }
             for (RecipeIngredient ing : ingredients) {
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -89,27 +102,18 @@ public class RecipeDAO {
     }
 
     public boolean deleteRecipe(int recipeId) throws SQLException {
-        String sql = "DELETE FROM recipes WHERE recipe_id = ?";
         try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = conn.prepareStatement("DELETE FROM recipes WHERE recipe_id = ?")) {
             ps.setInt(1, recipeId);
             return ps.executeUpdate() > 0;
         }
     }
 
-    /** Runs a recipe query with zero or one parameter. */
-    private List<Recipe> getRecipes(String sql, Object param) throws SQLException {
+    private List<Recipe> readRecipes(ResultSet rs) throws SQLException {
         List<Recipe> list = new ArrayList<>();
-        try (Connection conn = DBConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            if (param != null) {
-                ps.setObject(1, param);
-            }
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                list.add(new Recipe(rs.getInt("recipe_id"), rs.getString("title"), rs.getString("description"),
-                        rs.getString("instructions"), rs.getInt("cook_time"), rs.getInt("servings")));
-            }
+        while (rs.next()) {
+            list.add(new Recipe(rs.getInt("recipe_id"), rs.getString("title"), rs.getString("description"),
+                    rs.getString("instructions"), rs.getInt("cook_time"), rs.getInt("servings")));
         }
         return list;
     }
