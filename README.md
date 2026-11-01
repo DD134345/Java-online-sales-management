@@ -1,113 +1,66 @@
-# Java Online Sales Management
+# FreshLink – Online Grocery Store
 
-A desktop app that shop staff use to run a retail shop: look up customers, check stock, build orders, take payments and track sales. All money is in Vietnamese Dong (VND).
+Course project for **VGU – Object-Oriented Programming in Java**.
 
-Course project for **VGU 61CSE215 – Object-Oriented Programming in Java**.
+FreshLink is an online fresh-food market in the style of [Bách Hóa Xanh](https://www.bachhoaxanh.com/).
+Customers browse products by category, add them to a cart, order with a voucher, a delivery date and
+time slot, track the delivery, review what they bought and read recipes. Admins manage products,
+stock, vouchers, orders and users. All money is in Vietnamese Dong (VND).
 
 ## Tech stack
 
 | | |
 |---|---|
 | Language | Java 21 |
-| UI | Java Swing |
-| Database | PostgreSQL 15+ via plain JDBC (`PreparedStatement`, no ORM) |
+| UI | JavaFX or Swing (desktop) |
+| Database | PostgreSQL 15+ with plain JDBC (`PreparedStatement`, no ORM) |
 | Build | Maven, one project per tier |
 | Architecture | MVC 3-tier: UI/UX → Controller → Database |
 
-## Features
-
-Two roles log in to the app. Customers are records in the system, not users.
-
-| Area | Administrator (shop owner) | Sales staff |
-|---|---|---|
-| Staff accounts | Create, update, reset passwords | Log in and out |
-| Categories and products | Full control, including prices and stock | Search and view stock (read-only) |
-| Customers | Create, search, edit, view order history | Same |
-| Orders and payments | Cart, checkout, cash or card payment | Same |
-| Order status | `PENDING` → `PAID` → `SHIPPED`, or `CANCELLED` | Same |
-| Reports | Daily revenue, top products, low-stock alerts | Low-stock alerts only |
-
-Checkout is atomic: the order, its items, the payment and the stock deduction are saved in one database transaction. If stock runs out, nothing is saved.
-
-## Project structure
-
-Each folder is its own Maven project. Dependencies go one way only, so there are no cycles.
+## Project structure and owners
 
 ```
 Java-online-sales-management/
-├── Database/      sales-database   · schema.sql, seed.sql, XxxRecord records, XxxDao interfaces, PgXxxDao JDBC classes
-├── Controller/    sales-controller · domain classes, business rules, XxxService interfaces, ControllerFactory
-└── UI/UX/         sales-ui         · Swing screens, App launcher
+├── Database/     SQL tables, sample data, model classes, DAO classes      → Nguyễn Duy Đức Trọng
+├── Controller/   business rules (login, cart, checkout, roles, …)         → Controller member
+└── UI/UX/        screens                                                   → UI/UX member
 ```
 
-- **Database** returns its own records and knows nothing about the other tiers. All SQL lives here.
-- **Controller** turns records into domain objects (`Customer`, `Product`, `Order`, …) and holds the business rules.
-- **UI/UX** talks only to the Controller, through service interfaces.
+Each tier only talks to the tier next to it: UI/UX calls Controller, Controller calls Database.
 
-Each tier has a `TierBoundaryTest` that fails the build if it imports from a tier it must not.
-
-Design docs live next to the code: `Controller/docs/requirements.md`, `Database/docs/database.md`, `UI/UX/docs/screens.md`.
+| Tier | Status | Guide |
+|---|---|---|
+| Database | Done: 12 tables, sample data, 7 DAOs, 10 tests | [`Database/README.md`](Database/README.md) |
+| Controller | To do (starter `pom.xml` and `PasswordUtil` ready) | [`Controller/README.md`](Controller/README.md) |
+| UI/UX | To do | [`UI/UX/README.md`](UI/UX/README.md) |
 
 ## Getting started
 
-### Prerequisites
-
-- JDK 21
-- Maven 3.9+
-- PostgreSQL 15 or newer
-
-### 1. Create the databases
+Needed: JDK 21, Maven 3.9+, PostgreSQL 15+ (and IntelliJ IDEA).
 
 ```bash
-createdb -U postgres online_sales
-createdb -U postgres online_sales_test   # optional, for integration tests
-```
+# 1. Create the databases
+createdb -U postgres freshlink
+createdb -U postgres freshlink_test
 
-### 2. Configure the connection
-
-Copy the example file and fill in your PostgreSQL password:
-
-```bash
+# 2. Database settings (db.properties is not committed, so your password stays private)
 cp Database/src/main/resources/db.properties.example Database/src/main/resources/db.properties
+#    → open db.properties and write your PostgreSQL password
+
+# 3. Create the tables and sample data
+mvn -f Database/pom.xml compile exec:java
+
+# 4. Build the tiers in order (each one installs itself for the next)
+mvn -f Database/pom.xml install
+mvn -f Controller/pom.xml install
 ```
 
-`db.properties` is gitignored, so your password never gets committed.
+Demo accounts: `admin` / `Admin@123` (admin), `lan.nguyen` / `Fresh@123` (customer).
 
-### 3. Create the tables and sample data
+## Team workflow
 
-```bash
-mvn -q -f Database/pom.xml compile exec:java                      # main database
-mvn -q -f Database/pom.xml compile exec:java -Dexec.args="--test" # test database
-```
-
-The seed data includes two demo accounts: `admin` / `Admin@123` and `sales1` / `Sales@123`.
-
-### 4. Build and run
-
-Build the tiers in order: Database → Controller → UI/UX.
-
-```bash
-mvn -q -f Database/pom.xml install
-mvn -q -f Controller/pom.xml install
-mvn -q -f UI/UX/pom.xml exec:java
-```
-
-The integration tests in `Database/` run against `online_sales_test` and are skipped when `db.test.url` is not set.
-
-## Project status
-
-| Tier | Status |
-|---|---|
-| Database | Done: schema, seed data, DAOs, transactions, reports, tests |
-| Controller | In progress |
-| UI/UX | In progress |
-
-The work is split into slices: staff login and roles, categories and products, customers, order creation, order list and status, and sales statistics.
-
-## Team
-
-| Tier | Member |
-|---|---|
-| Database | Nguyen Duy Duc Trong |
-| Controller | _TBD_ |
-| UI/UX | _TBD_ |
+1. `git pull` on `main` before you start.
+2. Create a branch for your task: `database/...`, `controller/...` or `ui/...`.
+3. Commit small steps with clear messages, push the branch, open a Pull Request.
+4. Another member reviews, then merge into `main`. Nobody pushes straight to `main`.
+5. Only change your own tier's folder. Need something from another tier? Open an issue or ask its owner.
